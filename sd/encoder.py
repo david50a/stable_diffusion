@@ -46,7 +46,7 @@ class VAE_Encoder(nn.Sequential):
             nn.Conv2d(8,8,kernel_size=1,padding=0)
         )
 
-    def forward(self, x: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, noise) -> torch.Tensor:
         # x:(batch_size,channel,height,width)
         # noise: (batch_size,out_channels,height/8,width/8)
         for module in self:
@@ -54,16 +54,16 @@ class VAE_Encoder(nn.Sequential):
                 #(padding_left,padding_right,padding_up,padding_down)
                 x=F.pad(x,(0,1,0,1))
             x=module(x)
-            # (batch_size,8,height/8,width/8)-> two tensors of shape  (batch_size,4,height/8,width/8)
-            mean,log_variance=torch.chunk(x,2,dim=1)
-            # (batch_size,8,height/8,width/8)->  (batch_size,4,height/8,width/8)
-            log_variance=torch.clamp(log_variance,-30,20)
-            # (batch_size,8,height/8,width/8)-> (batch_size,4,height/8,width/8)
-            variance=log_variance.exp()
-            # (batch_size,8,height/8,width/8)-> (batch_size,4,height/8,width/8)
-            stdev=variance.sqrt()
-            #Z=N[0,1) -> N(mean,variance)=x?
-            #x=mean+stdev*Z
-            x=mean+stdev*noise
-            x*=0.18215
-            return x
+        # (batch_size,8,height/8,width/8)-> two tensors of shape  (batch_size,4,height/8,width/8)
+        mean,log_variance=torch.chunk(x,2,dim=1)
+        # (batch_size,8,height/8,width/8)->  (batch_size,4,height/8,width/8)
+        log_variance=torch.clamp(log_variance,-30,20)
+        # (batch_size,8,height/8,width/8)-> (batch_size,4,height/8,width/8)
+        variance=log_variance.exp()
+        # (batch_size,8,height/8,width/8)-> (batch_size,4,height/8,width/8)
+        stdev=variance.sqrt()
+        #Z=N[0,1) -> N(mean,variance)=x?
+        #x=mean+stdev*Z
+        x=mean+stdev*noise
+        x*=0.18215
+        return x
