@@ -22,24 +22,41 @@ class CLIPLayer(nn.Module):
         self.layernorm_2=nn.LayerNorm(n_embd)
         self.linear_1=nn.Linear(n_embd,4*n_embd)
         self.linear_2=nn.Linear(4*n_embd,n_embd)
-    def forward(self,x:torch.Tensor)->torch.Tensor:
-        #(batch_size,seq_len,dim)
-        residue=x
-        x=self.linear_1(x)
-        x=self.attention(x,casual_mask=True)
-        x+=residue
-        residue=x
-        x=self.layernorm_2(x)
-        x=self.linear_1(x)
-        x=x*torch.sigmoid(1.702*x)
-        x=self.linear_2(x)
-        x+=residue
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch_size, seq_len, dim)
+
+        # --- First Block: Attention ---
+        residue = x
+        x = self.layernorm_1(x)
+        # The attention block expects the original d_embed dimension
+        x = self.attention(x, casual_mask=True)
+        x = residue + x
+
+        # --- Second Block: MLP (Feed Forward) ---
+        residue = x
+        x = self.layernorm_2(x)
+
+        # MLP Expansion
+        x = self.linear_1(x)
+
+        # QuickGELU activation: x * sigmoid(1.702 * x)
+        x = x * torch.sigmoid(1.702 * x)
+
+        # MLP Projection back to d_embed
+        x = self.linear_2(x)
+
+        # Final residual connection
+        x = residue + x
+
         return x
-class CLIP(nn.Module):
+class CLIP(nn.Module): # Change from nn.ModuleList to nn.Module
     def __init__(self):
-        self.embedding=CLIPEmbedding(49400,768,77)
-        self.layers=nn.Module([CLIPLayer(12,768) for _ in range(12)])
-        self.layernorm=nn.LayerNorm(768)
+        super().__init__()
+        self.embedding = CLIPEmbedding(49408, 768, 77)
+        self.layers = nn.ModuleList([CLIPLayer(12, 768) for _ in range(12)])
+        self.layernorm = nn.LayerNorm(768)
+
     def forward(self,tokens:torch.LongTensor)->torch.FloatTensor:
         tokens=tokens.type(torch.long)
         # (batch_size,seq_len)-(batch_size,seq_len,dim)

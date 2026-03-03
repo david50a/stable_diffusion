@@ -8,21 +8,36 @@ class VAE_AttentionBlock(nn.Module):
         self.groupnorm=nn.GroupNorm(32,channels)
         self.attention=SelfAttention(1,channels)
 
-    def forward(self,x:torch.Tensor)->torch.Tensor:
-        # x: (batch_size,channels,height,width)
-        residue=x
-        b,c,h,w=x.shape
-        # x: (batch_size, channels, height, width)-> x: (batch_size,channels,height*width)
-        x=x.view(b,c,h*w)
-        # x: (batch_size,channels,height*width)-> x: (batch_size,height*width,channels)
-        x=x.transpose(-1,-2)
-        # x: (batch_size,channels,height*width)-> x: (batch_size,height*width,channels)
-        self.attention(x)
-        # x: (batch_size,channels,height*width)-> x: (batch_size,height*width,channels)
+    def forward(self, x):
+        # x: (Batch_Size, Features, Height, Width)
+
+        residue = x
+
+        # (Batch_Size, Features, Height, Width) -> (Batch_Size, Features, Height, Width)
+        x = self.groupnorm(x)
+
+        n, c, h, w = x.shape
+
+        # (Batch_Size, Features, Height, Width) -> (Batch_Size, Features, Height * Width)
+        x = x.view((n, c, h * w))
+
+        # (Batch_Size, Features, Height * Width) -> (Batch_Size, Height * Width, Features). Each pixel becomes a feature of size "Features", the sequence length is "Height * Width".
         x = x.transpose(-1, -2)
-        # x: (batch_size,channels,height*width)-> (batch_size,channels,height,width)
-        x=x.view(b,c,h,w)
-        x+=residue
+
+        # Perform self-attention WITHOUT mask
+        # (Batch_Size, Height * Width, Features) -> (Batch_Size, Height * Width, Features)
+        x = self.attention(x)
+
+        # (Batch_Size, Height * Width, Features) -> (Batch_Size, Features, Height * Width)
+        x = x.transpose(-1, -2)
+
+        # (Batch_Size, Features, Height * Width) -> (Batch_Size, Features, Height, Width)
+        x = x.view((n, c, h, w))
+
+        # (Batch_Size, Features, Height, Width) + (Batch_Size, Features, Height, Width) -> (Batch_Size, Features, Height, Width)
+        x += residue
+
+        # (Batch_Size, Features, Height, Width)
         return x
 
 class VAE_ResidualBlock(nn.Module):
@@ -30,8 +45,8 @@ class VAE_ResidualBlock(nn.Module):
         super().__init__()
         self.groupnorm_1=nn.GroupNorm(32,in_channel)
         self.conv_1=nn.Conv2d(in_channel,out_channel,kernel_size=3,padding=1)
-        self.groupnorm_2=nn.GroupNorm(32,in_channel)
-        self.conv_2=nn.Conv2d(in_channel,out_channel,kernel_size=3,padding=1)
+        self.groupnorm_2=nn.GroupNorm(32,out_channel)
+        self.conv_2=nn.Conv2d(out_channel,out_channel,kernel_size=3,padding=1)
         if in_channel==out_channel:
             self.residual_layer=nn.Identity()
         else:
@@ -43,7 +58,7 @@ class VAE_ResidualBlock(nn.Module):
         x=F.silu(x)
         x=self.conv_1(x)
         x=self.groupnorm_2(x)
-        x=F.selu(x)
+        x=F.silu(x)
         x=self.conv_2(x)
         return x+self.residual_layer(residue)
 

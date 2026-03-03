@@ -14,9 +14,9 @@ def generate(prompt:str, negative_prompt:str, input_image=None,
         if not (0<=strength<=1.0):
             raise ValueError('strength must be between 0 and 1')
         if idle_device:
-            to_idle: lambda x: x.to(idle_device)
+            to_idle= lambda x: x.to(idle_device)
         else:
-            to_idle: lambda x: x
+            to_idle= lambda x: x
 
         generator=torch.Generator(device=device)
         if seed is None:
@@ -27,30 +27,43 @@ def generate(prompt:str, negative_prompt:str, input_image=None,
         clip.to(device)
 
         if do_cfg:
-            # convert prompt into tokens using the tokenizer
-            cond_tokens=tokenizer.batch_decode_plus([prompt],paddinr='max_length',max_length=77).input_ids
-            # (batch_size,seq_len)
-            cond_tokens=torch.tensor(cond_tokens,dtype=torch.long,device=device)
-            # (batch_size,seq_len)->(batch_size,seq_len,dim)
-            cond_content=clip(cond_tokens)
+            # 1. Fix Conditional Tokens
+            encoding = tokenizer(
+                [prompt],
+                padding='max_length',
+                max_length=77,
+                truncation=True,
+                return_tensors="pt"
+            ).to(device)
+            cond_content = clip(encoding.input_ids)
 
-            uncond_tokens=tokenizer.batch_decode_plus([prompt],paddinr='max_length',max_length=77).input_ids
-            uncond_tokens=torch.tensor(uncond_tokens,dtype=torch.long,device=device)
-            # (batch_size,seq_len)->(batch_size,seq_len,dim)
-            uncond_content=clip(uncond_tokens)
+            # 2. Fix Unconditional (Negative) Tokens
+            # Use negative_prompt if provided, else empty string
+            uncond_encoding = tokenizer(
+                [negative_prompt],
+                padding='max_length',
+                max_length=77,
+                truncation=True,
+                return_tensors="pt"
+            ).to(device)
+            uncond_content = clip(uncond_encoding.input_ids)
 
-            # (2,seq_len,dim) = (2,77,768)
-            context=torch.cat([cond_content,uncond_content])
+            # (2, 77, 768)
+            context = torch.cat([cond_content, uncond_content])
         else:
-            # convert it into a list of tokens
-            tokens=tokenizer.batch_decode_plus([prompt],paddinr='max_length',max_length=77).input_ids
-            tokens=torch.tensor(tokens,dtype=torch.long,device=device)
-            # (1,77,768)
-            context=clip(tokens)
+            # 3. Fix simple prompt tokens
+            tokens = tokenizer(
+                [prompt],
+                padding='max_length',
+                max_length=77,
+                truncation=True,
+                return_tensors="pt"
+            ).input_ids.to(device)
+            context = clip(tokens)
         to_idle(clip)
         if sample_name=='ddpm':
-            sampler=DDPMSampler()
-            sampler.set_interface_steps(n_interface_steps)
+            sampler=DDPMSampler(generator)
+            sampler.set_interface_timesteps(n_interface_steps)
         else:
             raise ValueError(f'Unknown sampler {sample_name}')
         latents_shape=(1,4,LATENTS_HEIGHT,LATENTS_WIDTH)
@@ -77,7 +90,7 @@ def generate(prompt:str, negative_prompt:str, input_image=None,
             latents=torch.randn(latents_shape,generator=generator,device=device)
         diffusion=models['diffusion']
         diffusion.to(device)
-        timesteps=tqdm(diffusion.timesteps)
+        timesteps=tqdm(sampler.timesteps)
         for i, timestep in enumerate(timesteps):
             # (1,320)
             time_embedding=get_time_embedding(timestep).to(device)
